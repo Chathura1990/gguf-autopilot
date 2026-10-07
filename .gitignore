@@ -1,0 +1,6 @@
+node_modules/
+models/
+*.gguf
+*.part
+.DS_Store
+CLAUDE.md

@@ -1,0 +1,49 @@
+{
+  "_about": "How each abstract setting is written for llama-server. Variants are tried in order; the first whose 'detect' regex matches `llama-server --help` is used. 'only' = values this variant can express; 'map' = value renames; 'valueInHelp' = the value itself must appear in --help. Update this file when llama.cpp renames or adds flags; users can extend it via 'flags' in their config.json.",
+  "version": 2,
+  "updated": "2026-10-07",
+  "checkedAgainst": "ggml-org/llama.cpp master tools/server/README.md (2026-10)",
+  "order": ["model", "ctx", "ngl", "nCpuMoe", "flashAttn", "kvK", "kvV", "parallel", "threads", "threadsBatch", "batch", "ubatch", "cacheRam", "mlock", "noMmap", "reasoning", "specType", "specDraftMax", "mmproj", "imageMaxTokens", "embeddings", "jinja", "metrics", "host", "port"],
+  "flags": {
+    "model":        [{ "detect": "--model", "args": ["-m", "{v}"] }],
+    "ctx":          [{ "detect": "--ctx-size", "args": ["-c", "{v}"] }],
+    "ngl":          [{ "detect": "--n-gpu-layers", "args": ["-ngl", "{v}"] }],
+    "nCpuMoe":      [{ "detect": "--n-cpu-moe", "args": ["--n-cpu-moe", "{v}"] }],
+    "flashAttn": [
+      { "detect": "--flash-attn\\s+\\[?on\\|off", "args": ["-fa", "{v}"] },
+      { "detect": "--flash-attn", "args": ["-fa"], "only": ["on"] }
+    ],
+    "kvK":          [{ "detect": "--cache-type-k", "args": ["-ctk", "{v}"] }],
+    "kvV":          [{ "detect": "--cache-type-v", "args": ["-ctv", "{v}"] }],
+    "parallel":     [{ "detect": "--parallel", "args": ["-np", "{v}"] }],
+    "threads":      [{ "detect": "--threads\\b", "args": ["-t", "{v}"] }],
+    "threadsBatch": [{ "detect": "--threads-batch", "args": ["-tb", "{v}"] }],
+    "batch":        [{ "detect": "--batch-size", "args": ["-b", "{v}"] }],
+    "ubatch":       [{ "detect": "--ubatch-size", "args": ["-ub", "{v}"] }],
+    "cacheRam":     [{ "detect": "--cache-ram", "args": ["--cache-ram", "{v}"] }],
+    "mlock": [
+      { "detect": "--load-mode", "args": ["--load-mode", "mmap+mlock"], "only": ["true"] },
+      { "detect": "--mlock", "args": ["--mlock"], "only": ["true"] }
+    ],
+    "noMmap": [
+      { "detect": "--load-mode", "args": ["--load-mode", "none"], "only": ["true"] },
+      { "detect": "--no-mmap", "args": ["--no-mmap"], "only": ["true"] }
+    ],
+    "reasoning": [
+      { "detect": "--reasoning\\s+\\[?on\\|off", "args": ["--reasoning", "{v}"] },
+      { "detect": "--reasoning-budget", "args": ["--reasoning-budget", "0"], "only": ["off"] }
+    ],
+    "specType": [
+      { "detect": "--spec-default", "args": ["--spec-default"], "only": ["ngram"] },
+      { "detect": "--spec-type", "valueInHelp": true, "map": { "ngram": "ngram-mod" }, "args": ["--spec-type", "{v}"] }
+    ],
+    "specDraftMax": [{ "detect": "--spec-draft-n-max", "args": ["--spec-draft-n-max", "{v}"] }],
+    "mmproj":       [{ "detect": "--mmproj", "args": ["--mmproj", "{v}"] }],
+    "imageMaxTokens": [{ "detect": "--image-max-tokens", "args": ["--image-max-tokens", "{v}"] }],
+    "embeddings":   [{ "detect": "--embedding", "args": ["--embeddings"], "only": ["true"] }],
+    "jinja":        [{ "detect": "--jinja", "args": ["--jinja"], "only": ["true"] }],
+    "metrics":      [{ "detect": "--metrics", "args": ["--metrics"], "only": ["true"] }],
+    "host":         [{ "detect": "--host", "args": ["--host", "{v}"] }],
+    "port":         [{ "detect": "--port", "args": ["--port", "{v}"] }]
+  }
+}
