@@ -1,0 +1,15 @@
+{
+  "name": "gguf-autopilot",
+  "version": "0.1.0",
+  "description": "Paste a Hugging Face or Ollama model link; detects your hardware, picks the right GGUF quantization, downloads it and runs it with llama.cpp.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": { "gguf-install": "bin/install.cjs", "gguf-run": "bin/run.cjs" },
+  "scripts": {
+    "install-model": "node bin/install.cjs",
+    "run": "node bin/run.cjs --no-think",
+    "test": "node test/run-tests.cjs"
+  },
+  "engines": { "node": ">=18.17" },
+  "dependencies": {}
+}
