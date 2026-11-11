@@ -1,10 +1,40 @@
-# gguf-autopilot
+<p align="center">
+  <img src="assets/banner.svg" alt="gguf-autopilot" width="100%">
+</p>
 
-**Paste a model link. Get the GGUF that fits your machine, ready to run.**
+# gguf-autopilot - automated GGUF model installer and runner
+
+![release](https://img.shields.io/github/package-json/v/Chathura1990/gguf-autopilot?label=release&color=2563eb)
+![last commit](https://img.shields.io/github/last-commit/Chathura1990/gguf-autopilot?label=last%20commit&color=d4a017)
+
+![Powered by](https://img.shields.io/badge/Powered%20by-llama.cpp-84cc16)
+![platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-2563eb)
+![license](https://img.shields.io/github/license/Chathura1990/gguf-autopilot?color=22c55e)
+![node](https://img.shields.io/badge/node-%E2%89%A518.17-339933?logo=node.js&logoColor=white)
+![dependencies](https://img.shields.io/badge/npm%20dependencies-0-brightgreen)
+
+![repo size](https://img.shields.io/github/repo-size/Chathura1990/gguf-autopilot?color=0ea5e9)
+![issues](https://img.shields.io/github/issues/Chathura1990/gguf-autopilot?color=f97316)
+![PRs](https://img.shields.io/badge/PRs-welcome-22c55e)
+
+**Paste a model link and get the perfect match for your machine, ready to run.**
 
 Give it a **Hugging Face** or **Ollama** model link. It checks your hardware, picks the GGUF quantization that fits, downloads it quickly, and runs it with **llama.cpp**, tuned for your machine.
 
-Zero npm dependencies · Node 18.17+ · macOS / Windows / Linux
+## Features
+
+- 🔗 Paste a **Hugging Face** or **Ollama** link: repo, pinned quant, single file or short form
+- 🖥️ Detects your hardware: Apple Silicon, NVIDIA VRAM or CPU RAM, and your memory budget
+- 🎯 Picks the largest GGUF quant that fits, with `--prefer speed|balanced|quality`
+- ⚡ Fast, resumable downloads with live speed and ETA (curl, or 16 parallel Node connections)
+- 🔒 Integrity check: sha256 against the HF LFS hash or Ollama digest
+- 🧠 Reads the GGUF header: layers, KV heads, hybrid attention, MoE, MTP draft layers
+- 🛠️ Builds the fastest llama.cpp command per run and explains every setting (`--explain`)
+- 👁️ Vision models: optional mmproj download and per-run image-input choice
+- 🩹 Self-healing start-up: retries without speculative decoding, then in safe mode
+- 🌐 Starts the web UI on the first free port, with a live health and test-request check
+- 🔄 Adapts to new llama.cpp releases through a flag catalog; your settings survive upgrades
+- 📦 Zero npm dependencies, Node 18.17+, macOS / Windows / Linux
 
 ## Quick start
 

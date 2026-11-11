@@ -15,16 +15,18 @@ console.log(`\n  ${bin} · llama.cpp ${ll.version}${ll.commit ? ` (${ll.commit})
 console.log('  Catalog setting   Status');
 console.log(`  ${'─'.repeat(16)}  ${'─'.repeat(50)}`);
 for (const key of cat.order) {
-  const hit = (cat.flags[key] || []).find((v) => new RegExp(v.detect).test(ll.help));
-  console.log(`  ${key.padEnd(16)}  ${hit ? `✔ ${hit.args.join(' ')}` : '✘ no matching flag in this build'}`);
+  const hits = (cat.flags[key] || []).filter((v) => new RegExp(v.detect).test(ll.help));
+  const show = hits.map((v) => `${v.args.join(' ')}${v.only ? ` (for ${v.only.join('/')})` : ''}`).join('  |  ');
+  console.log(`  ${key.padEnd(16)}  ${hits.length ? `✔ ${show}` : '✘ no matching flag in this build'}`);
 }
 
 const covered = new Set();
 for (const variants of Object.values(cat.flags)) for (const v of variants) (v.detect.match(/--[a-z0-9-]+/g) || []).forEach((f) => covered.add(f));
-const all = [...new Set(ll.help.match(/(?<![\w-])--[a-z][a-z0-9-]+/g) || [])].sort();
+const all = [...new Set((ll.help.match(/(?<![\w-])--[a-z][a-z0-9-]*[a-z0-9]/g) || []))].sort();
 const fresh = all.filter((f) => !covered.has(f));
 console.log(`\n  ${fresh.length} of ${all.length} flags in this build are not used by the planner (expected: most are niche).`);
 console.log('  Review for new performance options:\n');
-for (let i = 0; i < fresh.length; i += 4) console.log(`    ${fresh.slice(i, i + 4).map((f) => f.padEnd(28)).join('')}`);
+const w = Math.max(...fresh.map((f) => f.length), 10) + 2, cols = Math.max(1, Math.floor(120 / w));
+for (let i = 0; i < fresh.length; i += cols) console.log(`    ${fresh.slice(i, i + cols).map((f) => f.padEnd(w)).join('')}`);
 console.log('\n  To adopt a flag: add a variant to config/llama-flags.json (and a rule in lib/tuning.cjs if it needs a decision),');
 console.log('  bump "version", add a test with a --help excerpt, release. Users can also add variants under "flags" in their config.json.\n');

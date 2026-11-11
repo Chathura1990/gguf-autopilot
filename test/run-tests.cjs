@@ -156,18 +156,30 @@ const cfg27 = { mode: 'gpu', sizeGB: 13.56, ctx: 4096, ngl: 999, model: '/m/27b.
 const planFor = (o) => tuning.plan({ hw: m4, budget: mac24, can: can(NEW_HELP), ...o });
 const argsFor = (p, help = NEW_HELP) => tuning.render(cat, help, p.settings).args.join(' ');
 
-t('text-only: q8_0 KV + flash attn + 1 slot, context fills the budget', () => {
+t('text-only: f16 KV (fastest) + flash attn + 1 slot + batch 2048, context fills the budget', () => {
   const p = planFor({ cfg: cfg8, info: llama8 });
-  assert.strictEqual(p.kvType, 'q8_0');
-  assert.ok(p.settings.ctx > 50000 && p.settings.ctx % 1024 === 0, `ctx ${p.settings.ctx}`);
+  assert.strictEqual(p.kvType, 'f16');
+  assert.strictEqual(p.settings.ubatch, 2048);
+  assert.strictEqual(p.settings.ctx, 65536, `ctx ${p.settings.ctx}`);
   assert.ok(p.kvGB + cfg8.sizeGB + quant.OVERHEAD_GB <= mac24.gpu, 'fits the budget');
-  assert.match(argsFor(p), /-fa on -ctk q8_0 -ctv q8_0 -np 1/);
+  assert.match(argsFor(p), /-fa on -np 1/);
+  assert.ok(!argsFor(p).includes('-ctk'), 'no quantized KV flags');
+  assert.match(argsFor(p), /-b 2048 -ub 2048/);
+});
+t('text-only, tight memory: falls back to q8_0 KV when f16 would leave < 32K context', () => {
+  const p = planFor({ cfg: { ...cfg8, sizeGB: 12 }, info: llama8 });
+  assert.strictEqual(p.kvType, 'q8_0');
+  assert.match(argsFor(p), /-ctk q8_0 -ctv q8_0/);
 });
 t('vision: f16 KV, installer context, mmproj passed', () => {
   const p = planFor({ cfg: { ...cfg8, mmproj: '/m/mm.gguf' }, info: llama8, vision: true, mmprojGB: 0.9 });
   assert.strictEqual(p.kvType, 'f16');
   assert.strictEqual(p.settings.ctx, 8192);
   assert.match(argsFor(p), /--mmproj \/m\/mm\.gguf/);
+});
+t('context is always a power of two', () => {
+  assert.deepStrictEqual([3000, 5000, 20000, 70000, 131072].map(tuning.pow2Floor), [2048, 4096, 16384, 65536, 131072]);
+  for (const size of [2, 6.3, 9, 12]) { const c = planFor({ cfg: { ...cfg8, sizeGB: size }, info: llama8 }).settings.ctx; assert.strictEqual(c & (c - 1), 0, `ctx ${c}`); }
 });
 t('context capped at the model maximum', () => {
   assert.strictEqual(planFor({ cfg: { ...cfg8, sizeGB: 2 }, info: { ...llama8, ctxTrain: 32768 } }).settings.ctx, 32768);
