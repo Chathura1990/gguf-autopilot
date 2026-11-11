@@ -4,3 +4,4 @@ models/
 *.part
 .DS_Store
 CLAUDE.md
+.webui_secret_key

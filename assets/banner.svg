@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="gguf-autopilot">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#dc2626"/>
+      <stop offset="0.55" stop-color="#ef4444"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="16" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1200" height="300" rx="16" fill="none" stroke="#e2e8f0"/>
+  <!-- icon: speed dial with needle -->
+  <g transform="translate(250 150)" fill="none" stroke-linecap="round">
+    <path d="M -62 38 A 80 80 0 1 1 62 38" stroke="url(#g)" stroke-width="12"/>
+    <g stroke="#0f172a" stroke-width="5">
+      <line x1="-70" y1="-8" x2="-58" y2="-12"/>
+      <line x1="-36" y1="-58" x2="-28" y2="-48"/>
+      <line x1="0" y1="-76" x2="0" y2="-62"/>
+      <line x1="36" y1="-58" x2="28" y2="-48"/>
+      <line x1="70" y1="-8" x2="58" y2="-12"/>
+    </g>
+    <line x1="0" y1="8" x2="34" y2="-34" stroke="#0f172a" stroke-width="8"/>
+    <circle cx="0" cy="8" r="11" fill="#0f172a" stroke="none"/>
+    <circle cx="0" cy="8" r="4" fill="#f97316" stroke="none"/>
+  </g>
+  <text x="360" y="178" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="-2" fill="#0b1020">gguf-<tspan fill="url(#g)">autopilot</tspan></text>
+  <text x="364" y="222" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="26" fill="#475569">Paste a model link. Get the right quant, tuned and running.</text>
+</svg>
