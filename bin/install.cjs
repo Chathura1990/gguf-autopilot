@@ -3,7 +3,7 @@
 // Interactive GGUF installer for llama.cpp.
 //
 //   node bin/install.cjs [model-link] [--quant=Q4_K_M] [--ctx=8192]
-//                        [--prefer=speed|balanced|quality] [--yes] [--dry-run] [--no-verify] [--connections=16]
+//                        [--prefer=speed|balanced|quality|performance] [--yes] [--dry-run] [--no-verify] [--connections=16]
 const fs = require('fs');
 const path = require('path');
 const hardware = require('../lib/hardware.cjs');
@@ -31,7 +31,7 @@ function parseArgs(argv) {
     else if (x === '--help' || x === '-h') a.help = true;
     else if (!x.startsWith('-')) a.url = x;
   }
-  if (!quant.CAPS[a.prefer]) throw new Error('--prefer must be speed, balanced or quality');
+  if (!quant.CAPS[a.prefer]) throw new Error('--prefer must be speed, balanced, quality or performance');
   return a;
 }
 
@@ -55,6 +55,7 @@ async function main() {
   console.log(`    CPU           ${hw.cpuModel} (${hw.cpuThreads} threads)`);
   console.log(`    RAM           ${fmtGB(hw.totalGB)}`);
   console.log(`    Accelerator   ${ACCEL[hw.accel]}${hw.gpuName && hw.accel === 'cuda' ? ` — ${hw.gpuName}, ${fmtGB(hw.gpuGB)} VRAM` : ''}`);
+  if (hw.bandwidthGBs) console.log(`    Memory speed  ~${hw.bandwidthGBs} GB/s (sets the token speed ceiling)`);
   console.log(`    Model budget  ${budget.gpu > 0 ? `${fmtGB(budget.gpu)} GPU` : ''}${budget.gpu > 0 && budget.ram > 0 ? ' + ' : ''}${budget.ram > 0 ? `${fmtGB(budget.ram)} RAM` : ''}`);
 
   // 2. llama.cpp
@@ -76,10 +77,19 @@ async function main() {
   if (listing.note) console.log(`  ${listing.note}`);
 
   // 4. Choose
-  const plan = quant.choosePlan(listing.candidates, budget, { prefer: args.prefer, ctx: args.ctx, quant: args.quant || listing.pinned });
+  const plan = quant.choosePlan(listing.candidates, budget, { prefer: args.prefer, ctx: args.ctx, quant: args.quant || listing.pinned, bandwidthGBs: hw.bandwidthGBs });
   console.log(`\n  ${listing.title} — ${plan.rows.length} file(s), estimates at ${plan.ctx.toLocaleString()} context:\n`);
-  table(['#', 'Quant', 'Size', 'Needs', 'Runs on', ''],
-    plan.rows.map((r, i) => [i + 1, r.label, fmtGB(r.sizeGB), `~${fmtGB(r.needGB)}`, MODE[r.mode], r === plan.pick ? '★ recommended' : '']));
+  const hasTps = plan.rows.some((r) => r.tps != null);
+  const mark = (r) => {
+    const q = r === plan.pick, b = r === plan.balanced;
+    if (q && b) return '★ recommended (best quality + comfortable fit)';
+    return [q ? '★ best quality that fits' : '', b ? '⚡ best balance' : ''].filter(Boolean).join(' ');
+  };
+  table(['#', 'Quant', 'Size', 'Needs', 'Spare', ...(hasTps ? ['~tok/s'] : []), 'Runs on', ''],
+    plan.rows.map((r, i) => [i + 1, r.display || r.label, fmtGB(r.sizeGB), `~${fmtGB(r.needGB)}`,
+      r.spareGB == null ? '' : fmtGB(r.spareGB), ...(hasTps ? [r.tps == null ? '' : `~${r.tps.toFixed(0)}`] : []), MODE[r.mode], mark(r)]));
+  console.log(`\n  Spare = budget minus what the file needs at ${plan.ctx.toLocaleString()} context; more spare = longer context and no swapping.`);
+  if (hasTps) console.log('  ~tok/s is a rough dense-model estimate from memory bandwidth (MoE and MTP models run faster); real speed will differ.');
   console.log('');
 
   let pick = plan.pick;
@@ -90,13 +100,19 @@ async function main() {
     if (args.yes) process.exit(1);
   } else {
     if (pick.mode === 'hybrid') console.log('  Note: this will split layers between GPU and CPU — expect it to be slower.');
+    if (pick.spareGB != null && pick.spareGB < plan.reserveGB) {
+      console.log(`  Note: ★ leaves only ${fmtGB(pick.spareGB)} spare (comfortable is ${fmtGB(plan.reserveGB)}+): short context and a risk of swapping.`);
+      if (plan.balanced && plan.balanced !== pick) console.log(`        ⚡ ${plan.balanced.display || plan.balanced.label} (${fmtGB(plan.balanced.sizeGB)}) is the best balance: type b to choose it, or run with --prefer=performance.`);
+    }
     if (pick.bpw != null && pick.bpw < quant.MIN_GOOD_BPW) console.log('  Note: below ~3.4 bits/weight, answer quality drops noticeably. Consider a smaller model.');
   }
 
   if (!args.yes) {
-    const q = pick ? `  Download ★ ${pick.label} (${fmtGB(pick.sizeGB)})? [Y/n, or a # to choose another] ` : '  Enter a # to download anyway, or press Enter to quit: ';
+    const q = pick ? `  Download ★ ${pick.display || pick.label} (${fmtGB(pick.sizeGB)})? [Y/n, a # to choose another${plan.balanced && plan.balanced !== pick ? ', b = ⚡ best balance' : ''}] ` : '  Enter a # to download anyway, or press Enter to quit: ';
     const ans = (await ask(q)).toLowerCase();
-    if (/^\d+$/.test(ans)) {
+    if (ans === 'b' && plan.balanced) {
+      pick = plan.balanced;
+    } else if (/^\d+$/.test(ans)) {
       pick = plan.rows[Number(ans) - 1];
       if (!pick) throw new Error(`No row #${ans}.`);
     } else if (!pick || ans === 'n' || ans === 'no') {

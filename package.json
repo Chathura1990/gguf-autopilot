@@ -8,7 +8,8 @@
   "scripts": {
     "install-model": "node bin/install.cjs",
     "run": "node bin/run.cjs --no-think",
-    "test": "node test/run-tests.cjs"
+    "test": "node test/run-tests.cjs",
+    "explain": "node bin/run.cjs --explain"
   },
   "engines": { "node": ">=18.17" },
   "dependencies": {}
