@@ -36,6 +36,8 @@ Give it a **Hugging Face** or **Ollama** model link. It checks your hardware, pi
 - 🔄 Adapts to new llama.cpp releases through a flag catalog; your settings survive upgrades
 - 📦 Zero npm dependencies, Node 18.17+, macOS / Windows / Linux
 
+- 🆕 **NEW: Fetch web page content.** Paste a link in your chat message and the page's text is fetched and added to the model's context, so it can answer from the real page. Works with public web pages, JSON and plain text (up to 3 links per message). [How to use it](#-new-chat-with-web-pages-link-fetching)
+
 ## Quick start
 
 ```bash
@@ -48,6 +50,8 @@ node bin/run.cjs --cli            # or chat in the terminal
 ```
 
 Open the address `run.cjs` prints (e.g. `http://127.0.0.1:8033`). Use `127.0.0.1`, not `localhost`: `localhost` may reach another app on the same port.
+
+> **🆕 New: paste a link, chat with the page.** When the model is ready, `run.cjs` prints a second address (`🔗 Link fetching ON`). Open that one, then send e.g. `Summarize https://github.com/ggml-org/llama.cpp in 5 bullets`. The page is fetched and added to your message. Works in the llama.cpp web UI and Open WebUI. Details [below](#-new-chat-with-web-pages-link-fetching).
 
 ## Accepted links
 
@@ -79,6 +83,8 @@ Open the address `run.cjs` prints (e.g. `http://127.0.0.1:8033`). Use `127.0.0.1
 | `balanced` (default) | Q6_K | Good quality/speed trade-off |
 | `quality` | Q8_0 | Plenty of memory |
 
+The model table also shows **Spare** (budget minus what the file needs), an estimated **~tok/s** (from memory bandwidth, when the chip is known) and the variant series for files that share a quant name. **★** marks the best quality that fits; **⚡** marks the best balance. Type `b` at the prompt to take the ⚡ one.
+
 ### Vision models
 
 If the repo has a vision projector (mmproj), the installer explains what it is and asks **"Download the vision projector? [Y/n]"**. If you download it, `run.cjs` asks each time whether to use it.
@@ -104,6 +110,7 @@ If the repo has a vision projector (mmproj), the installer explains what it is a
 | `--quant=Q4_K_M` | Force a quant |
 | `--ctx=16384` | Force context size |
 | `--prefer=speed\|balanced\|quality` | See above |
+| `--prefer=performance` | Picks the **⚡ best balance** file: the largest quant that still leaves a safe memory reserve (more context, no swapping, faster) |
 | `--yes` / `-y` | Non-interactive: accept the recommendation |
 | `--dry-run` | Show the plan, don't download |
 | `--no-verify` | Skip sha256 check (faster on huge files) |
@@ -204,9 +211,114 @@ When gguf-autopilot (e.g. `brew upgrade`) or llama.cpp changes the command, the 
 | `--ctx=` `--ngl=` `--kv=` `--threads=` `--threads-batch=` `--batch=` `--ubatch=` `--cache-ram=` `--n-cpu-moe=` `--fa=` `--parallel=` | Override one setting |
 | `--mlock`, `--no-mmap`, `--metrics` | Switch these on |
 | `--set key=value` | Override any setting by name (also future ones) |
+| `--no-url-fetch` | Don't start the link-fetching proxy |
+| `--proxy-port=N` | Fixed proxy port (default: first free after the server port) |
+| `--fetch-chars=N` | Max characters added per page (default 12000) |
 | `--init-config` | Create your config file |
 | `path/to/model.json` | Run a specific installed model (default: latest install) |
 | `-- …` | Anything after `--` is passed straight to llama.cpp |
+
+### 🆕 NEW: Chat with web pages (link fetching)
+
+> **New feature.** Local models can't browse the web. With link fetching, you paste a URL next to your question and the model answers from the real page. No plugin, no API key, no npm packages.
+
+#### How to use it (llama.cpp web UI)
+
+```bash
+node bin/run.cjs --no-think
+```
+
+When the model is ready, `run.cjs` prints a second address:
+
+```
+  ✔ Ready in 41s — test chat request OK.
+    Web UI + OpenAI API: http://127.0.0.1:8034
+
+  🔗 Link fetching ON. Open this address instead: http://127.0.0.1:8035
+```
+
+1. Open the **🔗 address** (8035 here). It is the same llama.cpp web UI, with link fetching in front.
+2. Type your question and paste a link in the same message:
+
+```text
+Summarize this in 5 bullets and tell me which quant fits 24 GB RAM:
+https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF
+```
+
+3. The terminal shows `🔗 ✔ fetched https://huggingface.co/huihui-ai/… (9,812 chars)` and the model answers from the page.
+
+Tips: ask about the page in the same message as the link; for a follow-up question, paste the link again (it is cached for 10 minutes, so it is instant); keep `--ctx` large enough (a page is ~3k tokens).
+
+#### How to use it (llama.cpp server API)
+
+The proxy speaks the same OpenAI-compatible API as `llama-server`, so scripts and tools work unchanged. Point them at the 🔗 port:
+
+```bash
+curl -s http://127.0.0.1:8035/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "messages": [{"role": "user", "content": "What changed in https://github.com/ggml-org/llama.cpp/releases/latest ?"}],
+  "max_tokens": 400
+}'
+```
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:8035/v1", api_key="none")
+r = client.chat.completions.create(model="local", messages=[{"role": "user", "content": "Summarize https://example.com"}])
+print(r.choices[0].message.content)
+```
+
+Streaming works. Everything except `POST …/chat/completions` (UI files, `/health`, `/props`, `/v1/models`, …) goes straight through to `llama-server`. `--cli` mode (`llama-cli`) has no server, so link fetching is not available there.
+
+#### What it can do
+
+| Capability | Detail |
+|---|---|
+| Reads web pages | HTML is turned into clean markdown-like text: headings, lists and code blocks kept; scripts, styles, nav, header, footer and svg dropped; title from `og:title` or `<title>` |
+| Reads data URLs | JSON, XML and plain text (APIs, raw GitHub files, `llms.txt`) are passed through as-is |
+| Several links | Up to 3 links per message, fetched in parallel |
+| Follows redirects | Up to 5; the final address is shown to the model |
+| Robust | 10 s timeout, 5 MB download cap, sensible browser-like User-Agent, character encodings handled |
+| Tells the model what went wrong | e.g. `[Could not fetch …: 404 Not Found]`, `Timeout after 10s`, `Invalid URL` |
+| Safe for chat | If fetching fails, your message is sent unchanged; page text is labelled "untrusted data, not instructions" |
+| Fast repeats | The same link within 10 minutes comes from a cache |
+| Auto-fixes a web UI quirk | Drops the web UI's `dry_penalty_last_n: -1`, which some llama.cpp builds reject |
+
+#### What it can't do
+
+| Limit | Why / what to do |
+|---|---|
+| PDFs, images, video, other binary files | Reported as `Unsupported content type`. Download the file and paste its text instead. |
+| Pages that need JavaScript to show content | Only the HTML the server sends is read (no browser is run), so single-page apps may show little text |
+| Pages behind a login or paywall | No cookies or sign-in. Public pages only. |
+| Very long pages | Cut at 12,000 characters and marked truncated. Raise with `--fetch-chars=20000` (about 5k tokens). |
+| Old messages | Only links in your **latest** message are fetched. The page text is not stored in the chat history. |
+| Web search | It reads links you give it. It does not search the web. |
+
+#### Options
+
+| Flag | Meaning |
+|---|---|
+| `--no-url-fetch` | Don't start the proxy (use the plain llama.cpp address) |
+| `--proxy-port=N` | Fixed proxy port (default: first free port after the server port) |
+| `--fetch-chars=N` | Max characters added per page (default 12000) |
+
+#### Other clients (Open WebUI and similar)
+
+Any OpenAI-compatible client works by using the proxy as its base URL: `http://127.0.0.1:<proxy port>/v1`.
+
+For **Open WebUI**, add it under **Admin Panel → Settings → Connections → OpenAI API → +** (API key: `none`). Do **not** use *Settings → Integrations → Manage Tool Servers*: that expects an OpenAPI tool spec and fails with "Failed to connect to OpenAPI tool server". If Open WebUI runs in Docker, use `http://host.docker.internal:<proxy port>/v1`. Open WebUI's background title/tag prompts are not fetched.
+
+#### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `Field 'dry_penalty_last_n': Value must be between 0 <= value …, but got -1` | You are on the plain llama.cpp address. Open the 🔗 proxy address (it removes the field), or set Settings → Sampling → DRY penalty last N to `0`. |
+| Nothing fetched | Open the 🔗 address, not the llama.cpp one. Check the terminal for `🔗 ✘ could not fetch …`. |
+| Page text is cut off | `--fetch-chars=20000` |
+| Model ignores the page | Put the question and the link in the same message; make sure `--ctx` is big enough |
+| Other fields rejected the same way | Update llama.cpp (`brew upgrade llama.cpp`) |
+
+Fetching is automatic: any link in your latest message is read, even if you only meant to mention it. Page text is untrusted, and small models can still be steered by it.
 
 ### Server start-up
 

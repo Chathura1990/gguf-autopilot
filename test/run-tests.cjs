@@ -280,4 +280,137 @@ t('GGUF reader: hybrid, MoE, MTP, thinking template', () => {
   assert.strictEqual(info.embedding, false);
 });
 
-console.log(`\n  ${n} tests passed\n`);
+// Real-world case: 24 GB M4 Pro, huihui 27B repo (sizes in GiB, from an actual installer run).
+const huihui = Object.entries({ 'IQ3_S': 11.0, 'UD-IQ3_S': 11.1, 'UD-Q3_K_XL': 12.4, 'Q3_K': 12.6, 'UD-IQ4_XS': 13.4, 'Q4_K_S': 14.6, 'Q4_K_M': 15.4 })
+  .map(([q, s]) => ({ key: q, quant: q, label: q, sizeGB: s, parts: [] }));
+const m4pro = { gpu: 15.6, ram: 0 };
+
+t('best balance leaves a reserve; best quality may not', () => {
+  const p = quant.choosePlan(huihui, m4pro, { bandwidthGBs: 273 });
+  assert.strictEqual(p.pick.quant, 'UD-IQ4_XS');
+  assert.ok(p.pick.spareGB < p.reserveGB, 'tight fit has little spare');
+  assert.strictEqual(p.balanced.quant, 'UD-Q3_K_XL');
+  assert.ok(p.balanced.spareGB >= p.reserveGB);
+});
+t('--prefer=performance picks the balanced file', () => {
+  assert.strictEqual(quant.choosePlan(huihui, m4pro, { prefer: 'performance' }).pick.quant, 'UD-Q3_K_XL');
+});
+t('tokens/s estimate: smaller file is faster; unknown bandwidth gives null', () => {
+  const p = quant.choosePlan(huihui, m4pro, { bandwidthGBs: 273 });
+  const tps = (q) => p.rows.find((r) => r.quant === q).tps;
+  assert.ok(tps('IQ3_S') > tps('UD-IQ4_XS'));
+  assert.ok(tps('UD-IQ4_XS') > 8 && tps('UD-IQ4_XS') < 20, 'plausible range');
+  assert.strictEqual(quant.choosePlan(huihui, m4pro).rows[0].tps, null);
+});
+t('bandwidth lookup', () => {
+  assert.strictEqual(hardware.lookupBandwidth(hardware.APPLE_BW, 'Apple M4 Pro'), 273);
+  assert.strictEqual(hardware.lookupBandwidth(hardware.APPLE_BW, 'Apple M2 Max'), 400);
+  assert.strictEqual(hardware.lookupBandwidth(hardware.NVIDIA_BW, 'NVIDIA GeForce RTX 4070 Ti SUPER'), 672);
+  assert.strictEqual(hardware.lookupBandwidth(hardware.APPLE_BW, 'Intel Xeon'), null);
+});
+t('series names tell same-named quants apart', () => {
+  const r = { repo: 'huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF', revision: 'main' };
+  const f = (path) => ({ type: 'file', path, size: 9 * GiB, lfs: { size: 9 * GiB, oid: 'x' } });
+  const { candidates } = hf.groupGguf([
+    f('Huihui-Qwen3.8-27B-abliterated-Swift-1.5-GSQ-RCO-IQ3_XXS.gguf'),
+    f('Huihui-Qwen3.8-27B-abliterated-IQ3_XXS.gguf'),
+  ], r);
+  const d = candidates.map((c) => c.display).sort();
+  assert.deepStrictEqual(d, ['IQ3_XXS', 'Swift-1.5-GSQ-RCO IQ3_XXS']);
+});
+
+
+// ---- link fetching (local servers only, no internet) ----
+const http = require('http');
+const { fetchPageContent, htmlToText } = require('../lib/fetchpage.cjs');
+const { createProxy, enrich, findUrls, sanitize } = require('../lib/urlproxy.cjs');
+const pending = [];
+const ta = (name, fn) => pending.push(fn().then(() => { n++; console.log(`  ✔ ${name}`); }));
+const listen = (srv) => new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok(srv.address().port)));
+
+t('htmlToText: strips junk, keeps structure, og:title wins', () => {
+  const { title, text } = htmlToText('<html><head><title>T</title><meta property="og:title" content="OG &amp; Co"><style>p{}</style></head><body><header>HDR</header><nav>NAV</nav>' +
+    '<h2>Model card</h2><p>Hello <b>world</b> &lt;3</p><ul><li>one</li><li>two</li></ul><pre>x = 1\ny = 2</pre><p>use <code>run.cjs</code></p><script>bad()</script><svg><text>SVG</text></svg><footer>FTR</footer></body></html>');
+  assert.strictEqual(title, 'OG & Co');
+  assert.ok(text.includes('## Model card') && text.includes('Hello world <3'));
+  assert.ok(text.includes('- one') && text.includes('- two'));
+  assert.ok(text.includes('```\nx = 1\ny = 2\n```') && text.includes('`run.cjs`'));
+  for (const bad of ['HDR', 'NAV', 'FTR', 'bad()', 'SVG', 'p{}']) assert.ok(!text.includes(bad), bad);
+});
+t('findUrls: trims punctuation, dedupes, max 3', () => {
+  assert.deepStrictEqual(findUrls('see https://a.com/x, and (https://b.com/y). https://a.com/x'), ['https://a.com/x', 'https://b.com/y']);
+  assert.strictEqual(findUrls('1 https://a.com 2 https://b.com 3 https://c.com 4 https://d.com').length, 3);
+  assert.deepStrictEqual(findUrls('no links here'), []);
+});
+
+t('sanitize: drops a negative dry_penalty_last_n (web UI default), keeps valid values', () => {
+  const a = { dry_penalty_last_n: -1, temperature: 0.7 };
+  assert.strictEqual(sanitize(a), true);
+  assert.deepStrictEqual(a, { temperature: 0.7 });
+  const b = { dry_penalty_last_n: 256 };
+  assert.strictEqual(sanitize(b), false);
+  assert.strictEqual(b.dry_penalty_last_n, 256);
+});
+
+ta('enrich: appends page text (string and parts content), skips Open WebUI task prompts', async () => {
+  const fetcher = async (url) => ({ title: 'Hi', final_url: url, status_code: 200, content: 'PAGE TEXT', truncated: false });
+  let r = await enrich({ messages: [{ role: 'user', content: 'summarize https://x.test/a' }] }, { fetcher });
+  assert.ok(r.payload.messages[0].content.includes('PAGE TEXT') && r.fetched.length === 1);
+  r = await enrich({ messages: [{ role: 'user', content: [{ type: 'text', text: 'what is https://x.test/a' }, { type: 'image_url', image_url: { url: 'data:x' } }] }] }, { fetcher });
+  assert.ok(r.payload.messages[0].content.at(-1).text.includes('PAGE TEXT'));
+  r = await enrich({ messages: [{ role: 'user', content: '### Task:\nGenerate a title for https://x.test/a' }] }, { fetcher });
+  assert.strictEqual(r.fetched.length, 0);
+  r = await enrich({ messages: [{ role: 'user', content: 'hi' }] }, { fetcher });
+  assert.strictEqual(r.fetched.length, 0);
+});
+
+ta('fetchPageContent: html, json, truncation, 404, redirects, invalid url', async () => {
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/page') { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end('<title>Page</title><body><h1>Hi</h1><p>' + 'word '.repeat(100) + '</p></body>'); }
+    else if (req.url === '/data') { res.setHeader('content-type', 'application/json'); res.end('{"a":1}'); }
+    else if (req.url === '/go') { res.writeHead(302, { location: '/page' }); res.end(); }
+    else if (req.url === '/loop') { res.writeHead(302, { location: '/loop' }); res.end(); }
+    else if (req.url === '/bin') { res.setHeader('content-type', 'image/png'); res.end('x'); }
+    else { res.statusCode = 404; res.end('nope'); }
+  });
+  const port = await listen(srv); const base = `http://127.0.0.1:${port}`;
+  try {
+    let r = await fetchPageContent(`${base}/go`);
+    assert.strictEqual(r.title, 'Page'); assert.strictEqual(r.final_url, `${base}/page`); assert.strictEqual(r.status_code, 200);
+    assert.ok(r.content.startsWith('# Hi') && !r.truncated);
+    r = await fetchPageContent(`${base}/page`, { maxLength: 20 });
+    assert.ok(r.truncated && r.content.endsWith('…'));
+    r = await fetchPageContent(`${base}/data`); assert.strictEqual(r.content, '{"a":1}');
+    r = await fetchPageContent(`${base}/missing`); assert.ok(/^404 /.test(r.error) && r.status_code === 404);
+    r = await fetchPageContent(`${base}/loop`); assert.ok(/Too many redirects/.test(r.error));
+    r = await fetchPageContent(`${base}/bin`); assert.ok(/Unsupported content type/.test(r.error));
+    r = await fetchPageContent('ftp://x'); assert.ok(/Invalid URL/.test(r.error));
+    r = await fetchPageContent('not a url'); assert.ok(/Invalid URL/.test(r.error));
+  } finally { srv.close(); }
+});
+
+ta('proxy: injects page text into chat requests, streams the reply, passes other paths through', async () => {
+  let seen = null;
+  const upstream = http.createServer((req, res) => {
+    if (req.method === 'POST') {
+      let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { seen = JSON.parse(b); res.setHeader('content-type', 'text/event-stream'); res.write('data: one\n\n'); setTimeout(() => res.end('data: two\n\n'), 20); });
+    } else { res.setHeader('content-type', 'text/plain'); res.end('UI:' + req.url); }
+  });
+  const up = await listen(upstream);
+  const proxy = createProxy({ upstream: `http://127.0.0.1:${up}`, fetchImpl: async (url) => ({ title: 'T', final_url: url, status_code: 200, content: 'FETCHED BODY', truncated: false }) });
+  const pp = await listen(proxy);
+  try {
+    const get = await fetch(`http://127.0.0.1:${pp}/health`);
+    assert.strictEqual(await get.text(), 'UI:/health');
+    const post = (content) => fetch(`http://127.0.0.1:${pp}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stream: true, messages: [{ role: 'user', content }] }) });
+    const r = await post('summarize https://example.test/page');
+    assert.strictEqual(await r.text(), 'data: one\n\ndata: two\n\n');
+    assert.ok(seen.messages[0].content.startsWith('summarize https://example.test/page') && seen.messages[0].content.includes('FETCHED BODY'));
+    await (await post('just chatting')).text();
+    assert.strictEqual(seen.messages[0].content, 'just chatting');
+    await (await fetch(`http://127.0.0.1:${pp}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dry_penalty_last_n: -1, messages: [{ role: 'user', content: 'hi' }] }) })).text();
+    assert.ok(!('dry_penalty_last_n' in seen));
+  } finally { proxy.close(); upstream.close(); }
+});
+
+Promise.all(pending).then(() => console.log(`\n  ${n} tests passed\n`), (e) => { console.error(`\n  ✘ ${e.stack || e}\n`); process.exit(1); });

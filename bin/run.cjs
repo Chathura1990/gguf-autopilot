@@ -5,6 +5,7 @@
 //   node bin/run.cjs [model.json] [--cli] [--port=N] [--vision|--no-vision] [--no-think]
 //                    [--spec=auto|mtp|ngram|off] [--safe] [--explain] [--print]
 //                    [--ctx=N --ngl=N --kv=f16|q8_0|q4_0 --threads=N --ubatch=N --cache-ram=MiB --mlock --set key=value]
+//                    [--no-url-fetch] [--proxy-port=N] [--fetch-chars=N]
 //                    [--init-config] [-- extra llama.cpp args]
 //
 // Every run re-reads the model header, the hardware and `llama-server --help`, so the command
@@ -15,6 +16,7 @@ const net = require('net');
 const { spawn } = require('child_process');
 const runplan = require('../lib/runplan.cjs');
 const userconfig = require('../lib/userconfig.cjs');
+const { createProxy } = require('../lib/urlproxy.cjs');
 const { ask, close } = require('../lib/prompt.cjs');
 
 const MODELS = path.join(__dirname, '..', 'models');
@@ -216,8 +218,33 @@ function serve(bin, args, cfgPath, port, info) {
       } catch (e) {
         console.log(`\n  ⚠ Model loaded in ${secs}s, but the test request failed: ${e.message}\n`);
       }
+      startLinkProxy(port);
     })();
   });
+}
+
+/** Link-fetching proxy: paste a link in the chat and the page text is added to your message. Started once, after the model is ready. */
+let linkProxy = false;
+async function startLinkProxy(port) {
+  if (linkProxy || has('--no-url-fetch')) return;
+  linkProxy = true;
+  try {
+    const asked = opt('proxy-port');
+    const pport = asked ? Number(asked) : await findFreePort(port + 1);
+    if (asked && !(await portFree(pport))) throw new Error(`port ${pport} is in use`);
+    const srv = createProxy({
+      upstream: `http://127.0.0.1:${port}`,
+      maxChars: Number(opt('fetch-chars')) || 12000,
+      log: (m) => console.log(`  🔗 ${m}`),
+    });
+    await new Promise((ok, no) => srv.once('error', no).listen(pport, '127.0.0.1', ok));
+    console.log(`  🔗 Link fetching ON. Open this address instead: http://127.0.0.1:${pport}`);
+    console.log('     Paste a link in the chat and the page text is added to your message (up to 3 links).');
+    console.log(`     Open WebUI: set the OpenAI API URL to http://127.0.0.1:${pport}/v1 (Docker: http://host.docker.internal:${pport}/v1)`);
+    console.log('     Turn off with --no-url-fetch.\n');
+  } catch (e) {
+    console.log(`  ⚠ Link fetching not started: ${e.message}\n`);
+  }
 }
 
 function fail(bin, e) {
